@@ -7,6 +7,8 @@ struct PlaylistVideo
   property ucid : String
   property length_seconds : Int32
   property published : Time
+  @[DB::Field(ignore: true)]
+  property views : Int64?
   property plid : String
   property index : Int64
   property live_now : Bool
@@ -512,6 +514,31 @@ def extract_playlist_videos(playlist_id : String, initial_data : Hash(String, JS
           .try &.as_s
       end
 
+      published = nil
+      view_count_text = nil
+
+      metadata_rows.try &.each do |row|
+        parts = row["metadataParts"]?.try &.as_a
+
+        if view_count_text.nil?
+          view_count_text = parts.try &.find { |item2|
+            item2["icon"]?.nil? &&
+              item2.dig?("text", "content").try &.as_s.includes?("views")
+          }.try &.dig("text", "content").as_s
+        end
+
+        if published.nil?
+          published = parts.try &.find { |item2|
+            item2["icon"]?.nil? &&
+              item2.dig?("text", "content").try &.as_s.includes?("ago")
+          }.try { |item2| decode_date(item2.dig("text", "content").as_s) }
+        end
+
+        break if !view_count_text.nil? && !published.nil?
+      end
+
+      views = short_text_to_number(view_count_text || "0")
+
       length = thumbnail_view_model.try &.dig?("overlays", 0, "thumbnailBottomOverlayViewModel", "badges", 0, "thumbnailBadgeViewModel", "text").try &.as_s
       length_seconds = decode_length_seconds(length) if length
 
@@ -528,7 +555,8 @@ def extract_playlist_videos(playlist_id : String, initial_data : Hash(String, JS
         author:         author || "",
         ucid:           ucid || "",
         length_seconds: length_seconds,
-        published:      Time.utc,
+        published:      published || Time.local,
+        views:          views,
         plid:           plid,
         live_now:       live,
         index:          index || -1_i64,
